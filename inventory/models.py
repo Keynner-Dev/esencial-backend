@@ -40,14 +40,12 @@ class PurchaseInvoice(models.Model):
     invoice_number = models.CharField(max_length=60, blank=True)
     notes = models.TextField(blank=True)
 
-    # Clasificación contable
     category = models.CharField(
         max_length=30,
         choices=TxCategory.choices,
         default=TxCategory.MERCANCIA
     )
 
-    # Desde qué cuenta se pagó (efectivo, nequi, banco)
     paid_from_account = models.ForeignKey(
         Account,
         null=True,
@@ -62,8 +60,6 @@ class PurchaseInvoice(models.Model):
     )
 
     total_amount = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal("0.00"))
-
-    # Para evitar que cree ledger 2 veces
     ledger_created = models.BooleanField(default=False)
 
     def __str__(self):
@@ -71,8 +67,7 @@ class PurchaseInvoice(models.Model):
 
     def create_ledger_entry(self):
         """
-        Crea la salida de caja por compra.
-        Solo se crea una vez (ledger_created=True).
+        Crea la salida de caja por compra. Solo una vez.
         """
         if self.ledger_created:
             return
@@ -95,12 +90,43 @@ class PurchaseInvoice(models.Model):
     def finalize(self):
         """
         Llamar cuando ya terminaste de agregar items.
-        Calcula total (por si hay inconsistencias) y crea el ledger.
+        Recalcula total y crea el ledger.
         """
         total = self.items.aggregate(s=models.Sum("line_total"))["s"] or Decimal("0.00")
         self.total_amount = total
         self.save(update_fields=["total_amount"])
         self.create_ledger_entry()
+
+
+class InventoryMovement(models.Model):
+    IN = "IN"
+    OUT = "OUT"
+    ADJUSTMENT = "ADJUSTMENT"
+
+    TYPE_CHOICES = [
+        (IN, "Entrada"),
+        (OUT, "Salida"),
+        (ADJUSTMENT, "Ajuste"),
+    ]
+
+    product = models.ForeignKey(Product, on_delete=models.CASCADE)
+    movement_type = models.CharField(max_length=20, choices=TYPE_CHOICES)
+    quantity = models.DecimalField(max_digits=14, decimal_places=3)
+
+    reference_type = models.CharField(max_length=50, blank=True)
+    reference_id = models.CharField(max_length=50, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["product"]),
+            models.Index(fields=["created_at"]),
+        ]
+
+    def __str__(self):
+        return f"{self.movement_type} {self.quantity} {self.product.name}"
 
 
 class PurchaseItem(models.Model):
@@ -117,25 +143,35 @@ class PurchaseItem(models.Model):
         with transaction.atomic():
             super().save(*args, **kwargs)
 
-            if creating:
-                # Actualizar stock y costo promedio ponderado si maneja stock
-                if self.product.manages_stock:
-                    p = self.product
-                    old_qty = p.stock_qty
-                    old_avg = p.avg_cost_per_unit
+            if not creating:
+                return
 
-                    new_qty = old_qty + self.qty
+            # Actualizar stock + costo promedio ponderado
+            if self.product.manages_stock:
+                p = self.product
+                old_qty = p.stock_qty
+                old_avg = p.avg_cost_per_unit
 
-                    if new_qty > 0:
-                        new_avg = ((old_qty * old_avg) + (self.qty * self.unit_cost)) / new_qty
-                    else:
-                        new_avg = old_avg
+                new_qty = old_qty + self.qty
+                if new_qty > 0:
+                    new_avg = ((old_qty * old_avg) + (self.qty * self.unit_cost)) / new_qty
+                else:
+                    new_avg = old_avg
 
-                    p.stock_qty = new_qty
-                    p.avg_cost_per_unit = new_avg
-                    p.save(update_fields=["stock_qty", "avg_cost_per_unit"])
+                p.stock_qty = new_qty
+                p.avg_cost_per_unit = new_avg
+                p.save(update_fields=["stock_qty", "avg_cost_per_unit"])
 
-                # Actualiza total_amount de la factura sumando el item (rápido)
-                PurchaseInvoice.objects.filter(pk=self.invoice_id).update(
-                    total_amount=models.F("total_amount") + self.line_total
+                # Movimiento inventario IN
+                InventoryMovement.objects.create(
+                    product=self.product,
+                    movement_type=InventoryMovement.IN,
+                    quantity=self.qty,
+                    reference_type="PurchaseInvoice",
+                    reference_id=str(self.invoice_id),
                 )
+
+            # Actualiza total_amount (rápido)
+            PurchaseInvoice.objects.filter(pk=self.invoice_id).update(
+                total_amount=models.F("total_amount") + self.line_total
+            )
