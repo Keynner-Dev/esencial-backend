@@ -2,12 +2,13 @@ from datetime import datetime
 from decimal import Decimal
 
 from django.utils import timezone
-from django.db.models import Sum
+from django.db.models import Sum, Q
 
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.exceptions import ValidationError
+from rest_framework.generics import ListAPIView
 
 from .models import Account, Transaction, TxType, TxCategory, Loan
 from .serializers import (
@@ -22,7 +23,23 @@ from .permissions import IsAdminGroup
 
 
 def _parse_date(date_str: str):
-    return datetime.strptime(date_str, "%Y-%m-%d").date()
+    try:
+        return datetime.strptime(date_str, "%Y-%m-%d").date()
+    except Exception:
+        raise ValidationError("Fecha inválida. Formato esperado: YYYY-MM-DD")
+
+
+class CatalogsView(APIView):
+    """
+    Catálogos para frontend (combos).
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        return Response({
+            "tx_types": [{"value": v, "label": l} for v, l in TxType.choices],
+            "tx_categories": [{"value": v, "label": l} for v, l in TxCategory.choices],
+        })
 
 
 class AccountsListView(APIView):
@@ -34,10 +51,6 @@ class AccountsListView(APIView):
 
 
 class LedgerDailySummaryView(APIView):
-    """
-    Admin: puede consultar cualquier fecha con ?date=YYYY-MM-DD
-    Seller: SOLO puede ver HOY (si lo quieres, cambia permiso y lógica)
-    """
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
@@ -78,13 +91,6 @@ class LedgerDailySummaryView(APIView):
 
 
 class CreateLedgerTransactionView(APIView):
-    """
-    Crear movimientos de caja:
-    - GASTOS (EXPENSE)
-    - CAPITAL (CAPITAL_IN)
-    - TRANSFER (TRANSFER)
-    - AJUSTE (ADJUSTMENT)
-    """
     permission_classes = [IsAuthenticated, IsAdminGroup]
 
     def post(self, request):
@@ -109,36 +115,40 @@ class CreateLedgerTransactionView(APIView):
         return Response(TransactionSerializer(tx).data, status=201)
 
 
-class TransactionListView(APIView):
-    """
-    Listar transacciones con filtros:
-      ?start=YYYY-MM-DD&end=YYYY-MM-DD
-      ?account_id= (match from o to)
-      ?type=
-      ?category=
-    """
+class TransactionListView(ListAPIView):
     permission_classes = [IsAuthenticated, IsAdminGroup]
+    serializer_class = TransactionSerializer
 
-    def get(self, request):
-        start = request.query_params.get("start")
-        end = request.query_params.get("end")
-        account_id = request.query_params.get("account_id")
-        t = request.query_params.get("type")
-        cat = request.query_params.get("category")
+    def get_queryset(self):
+        qs = Transaction.objects.all().select_related(
+            "from_account",
+            "to_account",
+            "created_by"
+        ).order_by("-created_at")
 
-        qs = Transaction.objects.all().order_by("-created_at")
+        start = self.request.query_params.get("start")
+        end = self.request.query_params.get("end")
+        account_id = self.request.query_params.get("account_id")
+        t = self.request.query_params.get("type")
+        cat = self.request.query_params.get("category")
+        q = self.request.query_params.get("q")
 
-        if start and end:
-            qs = qs.filter(created_at__date__range=[start, end])
+        if start:
+            qs = qs.filter(created_at__date__gte=start)
+        if end:
+            qs = qs.filter(created_at__date__lte=end)
+
         if account_id:
-            qs = qs.filter(from_account_id=account_id) | qs.filter(to_account_id=account_id)
+            qs = qs.filter(Q(from_account_id=account_id) | Q(to_account_id=account_id))
+
         if t:
             qs = qs.filter(type=t)
         if cat:
             qs = qs.filter(category=cat)
+        if q:
+            qs = qs.filter(description__icontains=q)
 
-        qs = qs[:500]
-        return Response(TransactionSerializer(qs, many=True).data)
+        return qs
 
 
 class AccountBalanceView(APIView):
@@ -227,9 +237,9 @@ class PayLoanView(APIView):
         return Response(LoanSerializer(loan).data)
 
 
-class LoanListView(APIView):
+class LoanListView(ListAPIView):
     permission_classes = [IsAuthenticated, IsAdminGroup]
+    serializer_class = LoanSerializer
 
-    def get(self, request):
-        qs = Loan.objects.all().order_by("-created_at")
-        return Response(LoanSerializer(qs, many=True).data)
+    def get_queryset(self):
+        return Loan.objects.all().select_related("account", "created_by").order_by("-created_at")

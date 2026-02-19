@@ -22,6 +22,7 @@ INSTALLED_APPS = [
     # Third party
     "corsheaders",
     "rest_framework",
+    "drf_spectacular",
 
     # Local apps
     "users",
@@ -91,6 +92,9 @@ REST_FRAMEWORK = {
     "DEFAULT_PERMISSION_CLASSES": (
         "rest_framework.permissions.IsAuthenticated",
     ),
+    "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
+    "PAGE_SIZE": 20,
+    "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
 }
 
 AUTH_USER_MODEL = "users.User"
@@ -103,4 +107,11 @@ SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(hours=8),
     "REFRESH_TOKEN_LIFETIME": timedelta(days=7),
     "AUTH_HEADER_TYPES": ("Bearer",),
+}
+
+SPECTACULAR_SETTINGS = {
+    "TITLE": "ESENCIAL API",
+    "DESCRIPTION": "API para el sistema ESENCIAL (perfumería + inventario + caja).",
+    "VERSION": "1.0.0",
+    "SERVE_INCLUDE_SCHEMA": False,
 }

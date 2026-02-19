@@ -1,5 +1,6 @@
 from django.urls import path
 from .views import (
+    CatalogsView,
     AccountsListView,
     LedgerDailySummaryView,
     CreateLedgerTransactionView,
@@ -11,6 +12,9 @@ from .views import (
 )
 
 urlpatterns = [
+    # Catálogos
+    path("catalogs/", CatalogsView.as_view(), name="catalogs"),
+
     # Cuentas y caja
     path("accounts/", AccountsListView.as_view(), name="accounts"),
     path("ledger/summary/", LedgerDailySummaryView.as_view(), name="ledger-summary"),
