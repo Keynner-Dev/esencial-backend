@@ -47,6 +47,7 @@ INSTALLED_APPS = [
     "corsheaders",
     "rest_framework",
 
+    "users",
     "core",
     "inventory",
     "perfume",
@@ -139,3 +140,5 @@ REST_FRAMEWORK = {
         "rest_framework.permissions.IsAuthenticated",
     ),
 }
+
+AUTH_USER_MODEL = "users.User"
