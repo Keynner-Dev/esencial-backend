@@ -55,3 +55,14 @@ class Transaction(models.Model):
 
     def __str__(self) -> str:
         return f"{self.type} {self.amount}"
+
+class Loan(models.Model):
+    created_at = models.DateTimeField(auto_now_add=True)
+    lender_name = models.CharField(max_length=120)
+    total_amount = models.DecimalField(max_digits=14, decimal_places=2)
+    remaining_amount = models.DecimalField(max_digits=14, decimal_places=2)
+    account = models.ForeignKey(Account, on_delete=models.PROTECT)
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL)
+
+    def __str__(self):
+        return f"Loan {self.lender_name}"

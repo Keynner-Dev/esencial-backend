@@ -9,6 +9,12 @@ from .models import Account, Transaction
 from .serializers import AccountSerializer
 from .permissions import IsAdminGroup
 
+from rest_framework import status
+from core.permissions import IsAdminGroup
+from .models import Loan
+
+
+
 def _parse_date(date_str: str):
     # YYYY-MM-DD
     return datetime.strptime(date_str, "%Y-%m-%d").date()
@@ -66,3 +72,34 @@ class LedgerDailySummaryView(APIView):
             "summary": summary,
             "scope": "ADMIN_ANY_DATE" if is_admin else "SELLER_TODAY_ONLY",
         })
+
+
+
+class CreateLoanView(APIView):
+    permission_classes = [IsAuthenticated, IsAdminGroup]
+
+    def post(self, request):
+        lender = request.data["lender_name"]
+        amount = Decimal(request.data["amount"])
+        account = Account.objects.get(id=request.data["account_id"])
+
+        loan = Loan.objects.create(
+            lender_name=lender,
+            total_amount=amount,
+            remaining_amount=amount,
+            account=account,
+            created_by=request.user,
+        )
+
+        Transaction.objects.create(
+            created_by=request.user,
+            type=TxType.LOAN_IN,
+            category=TxCategory.PRESTAMO,
+            description=f"Préstamo de {lender}",
+            amount=amount,
+            to_account=account,
+            reference_type="Loan",
+            reference_id=str(loan.id),
+        )
+
+        return Response({"loan_id": loan.id})

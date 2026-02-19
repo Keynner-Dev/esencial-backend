@@ -10,6 +10,10 @@ from inventory.models import Product
 from perfume.models import Fragrance, PresentationDose, AlcoholCostByPresentation
 from .models import Sale, SaleItem
 from .serializers import POSSerializer
+from django.db.models import Sum
+from django.utils import timezone
+
+
 
 
 class POSView(APIView):
@@ -190,3 +194,22 @@ class RefundSaleView(APIView):
         sale.save(update_fields=["is_void", "void_reason"])
 
         return Response({"message": "Venta anulada correctamente."})
+
+
+
+class SalesSummaryView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        today = timezone.localdate()
+
+        sales = Sale.objects.filter(created_at__date=today, is_void=False)
+
+        total = sales.aggregate(total=Sum("total"))["total"] or 0
+        profit = sales.aggregate(profit=Sum("total_profit"))["profit"] or 0
+
+        return Response({
+            "date": str(today),
+            "total_sales": float(total),
+            "total_profit": float(profit),
+        })
